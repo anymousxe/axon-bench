@@ -1,0 +1,28 @@
+[project]
+name = "axon-bench"
+version = "1.0.0"
+description = "AXE — the Axon Labs evaluation suite. Open benchmark for any OpenAI-compatible model: general knowledge, coding, and reasoning, plus the adversarial AXE-Pro subset."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Axon Labs" }]
+keywords = ["benchmark", "llm", "evaluation"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://axon-chat-nu.vercel.app/benchmarks"
+
+[project.scripts]
+axon-bench = "axon_bench.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["axon_bench*"]
