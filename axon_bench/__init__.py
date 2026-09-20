@@ -1,16 +1,20 @@
-"""axon-bench — AXE, the Axon Labs evaluation suite."""
+"""axon-bench — the AXE evaluation suite."""
 
-from .tasks import TASKS, select
-from .runner import BenchResult, TaskResult, run_bench, to_json
+from __future__ import annotations
 
-__version__ = "1.0.0"
+from .runner import BenchResult, TaskResult, render_report, run_bench, to_json, write_report
+from .tasks import TASKS, Task, select
 
 __all__ = [
-    "TASKS",
-    "select",
     "BenchResult",
+    "Task",
     "TaskResult",
+    "TASKS",
+    "render_report",
     "run_bench",
+    "select",
     "to_json",
-    "__version__",
+    "write_report",
 ]
+
+__version__ = "1.1.0"

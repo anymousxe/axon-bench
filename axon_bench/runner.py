@@ -2,8 +2,11 @@
 
 Text tasks are matched by whole-token containment after normalisation
 (lowercased, accents stripped, punctuation removed). Coding tasks are
-executed: the last fenced python block is extracted, run in a timeout-bounded
-subprocess, and its output compared against the expected result.
+verified, never eyeballed: the last fenced code block (python, typescript,
+sql, or bare) is extracted; tasks with a `test_call` are executed in a
+timeout-bounded subprocess and compared exactly, the rest are checked for
+the required `code_checks` constructs. One failing request or crashing task
+cannot abort the run.
 """
 
 from __future__ import annotations
@@ -15,11 +18,12 @@ import sys
 import time
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 
 from .client import BenchError, chat_completion
 from .tasks import Task
 
-FENCE_RE = re.compile(r"```(?:python|py)?\s*\n([\s\S]*?)```", re.IGNORECASE)
+FENCE_RE = re.compile(r"```[ \t]*[a-zA-Z0-9+#._-]*[ \t]*\r?\n([\s\S]*?)```", re.IGNORECASE)
 
 CODE_TEMPLATE = """\
 import sys
@@ -84,8 +88,9 @@ def extract_code(response: str) -> str | None:
     if blocks:
         return blocks[-1].strip()
     stripped = response.strip()
-    if stripped.startswith("def ") or "\ndef " in stripped:
-        return stripped
+    for opener in ("def ", "class ", "function ", "interface ", "type ", "SELECT", "select", "WITH", "with"):
+        if stripped.startswith(opener) or f"\n{opener}" in stripped:
+            return stripped
     return None
 
 
@@ -110,18 +115,22 @@ def run_code(code: str, test_call: str, timeout: float) -> tuple[str | None, str
 
 
 def score_task(task: Task, response: str, code_timeout: float) -> tuple[bool, str]:
-    if task.category == "coding":
-        code = extract_code(response)
-        if code is None:
-            return False, "no python code block in response"
-        for required in task.code_checks:
-            if required not in code:
-                return False, f"missing required construct: {required!r}"
-        output, error = run_code(code, task.test_call, code_timeout)
-        if error:
-            return False, error
-        return output == task.answer, f"returned {output}; expected {task.answer}"
-    return text_passed(task, response)
+    wants_code = task.kind == "code" or bool(task.test_call) or bool(task.code_checks)
+    if not wants_code:
+        return text_passed(task, response)
+    code = extract_code(response)
+    if code is None:
+        return False, "no code block in response"
+    lowered = code.lower()
+    for required in task.code_checks:
+        if required.lower() not in lowered:
+            return False, f"missing required construct: {required!r}"
+    if not task.test_call:
+        return True, "required constructs present" if task.code_checks else "code block present"
+    output, error = run_code(code, task.test_call, code_timeout)
+    if error:
+        return False, error
+    return output == task.answer, f"returned {output}; expected {task.answer}"
 
 
 def run_bench(
@@ -152,7 +161,7 @@ def run_bench(
                 max_tokens=max_tokens,
             )
             passed, detail = score_task(task, response, code_timeout)
-        except BenchError as error:
+        except Exception as error:  # one bad request must not kill the run
             detail = f"request failed: {error}"
         results.append(
             TaskResult(
@@ -197,3 +206,36 @@ def to_json(result: BenchResult) -> str:
         },
         indent=2,
     )
+
+def render_report(result: BenchResult) -> str:
+    """Human-readable report: per-category accuracy, overall score, timing, per-task table."""
+    header = f"AXE v1 · {result.track} · {len(result.results)} tasks · {result.model}"
+    lines = [header, "=" * len(header), f"{'Category':<10} {'Pass':>7} {'Score':>7}"]
+    total = 0
+    for category in ("general", "coding", "reasoning"):
+        rows = [r for r in result.results if r.task.category == category]
+        if not rows:
+            continue
+        passed = sum(r.passed for r in rows)
+        total += passed
+        lines.append(f"{category:<10} {f'{passed}/{len(rows)}':>7} {100.0 * passed / len(rows):>6.1f}%")
+    lines.append("-" * 26)
+    lines.append(f"{'Overall':<10} {f'{total}/{len(result.results)}':>7} {result.overall():>6.1f}%")
+    if result.results:
+        seconds = [r.seconds for r in result.results]
+        lines.append("")
+        lines.append(f"time: total {sum(seconds):.1f}s · median {sorted(seconds)[len(seconds) // 2]:.2f}s · slowest {max(seconds):.2f}s")
+        lines.extend(("", "Task results"))
+        for r in result.results:
+            mark = "✓" if r.passed else "✗"
+            prompt = r.task.prompt if len(r.task.prompt) <= 70 else r.task.prompt[:69] + "..."
+            lines.append(f"  {mark} {r.task.category:<9} {r.seconds:5.2f}s  {prompt}")
+    return "\n".join(lines)
+
+
+def write_report(result: BenchResult, path: str) -> None:
+    """Write the rendered report to path, creating parent directories as needed."""
+    target = Path(path)
+    if target.parent != Path("."):
+        target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_report(result) + "\n", encoding="utf-8")

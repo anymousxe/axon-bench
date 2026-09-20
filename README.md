@@ -36,12 +36,12 @@ axon-bench http://localhost:11434/v1 --model llama3.1:8b
 axon-bench https://axon-chat-nu.vercel.app/api/v1 --model axon-1.7 --api-key axk_...
 ```
 
-Options:
-
 ```
---pro                      run the adversarial AXE-Pro subset
+--track {axe,pro}          which track to run (default: axe)
+--pro                      shorthand for --track pro
 --category {general,coding,reasoning}
---limit N                  cap the task count (good for quick smoke tests)
+--limit N                  cap the task count per category (smoke tests)
+--report PATH              also write the human-readable report to a file
 --temperature FLOAT        default 0.0
 --max-tokens N             default 2048
 --code-timeout SECONDS     per-task execution limit, default 10
@@ -55,28 +55,37 @@ AXE v1 · AXE · 50 tasks · model: your-model
   [1/50] ✓ What is the capital of Australia?
   ...
 
-============================================
-AXE results — your-model
-============================================
-  General      72.0
-  Coding       80.0
-  Reasoning    65.0
---------------------------------------------
-  Overall      72.3
+AXE v1 · AXE · 50 tasks · your-model
+===================================
+Category      Pass   Score
+general      18/20   90.0%
+coding       16/20   80.0%
+reasoning    13/20   65.0%
+--------------------------
+Overall      47/60   78.3%
+
+time: total 412.7s · median 6.42s · slowest 19.81s
 ```
 
 ## What's in the bank
 
-70 hand-written tasks, contamination-screened:
+170 hand-written tasks, contamination-screened (famous phrasings that leak
+the answer are avoided in favour of compositional, slightly-twisted
+prompts):
 
-| Track | General | Coding | Reasoning |
-|---|---|---|---|
-| AXE | 20 | 15 | 15 |
-| AXE-Pro | 10 | 5 | 5 |
+| Track | General | Coding | Reasoning | Total |
+|---|---|---|---|---|
+| AXE | 46 | 43 | 37 | 126 |
+| AXE-Pro | 19 | 13 | 11 | 43 |
 
-Coding prompts ask for a single function only, then run it. AXE-Pro reuses the
-same function names with harder contracts (unhashable inputs, empty inputs,
-tie-breaking rules) — memorised answers fail, real implementations pass.
+Python coding prompts ask for a single function, then run it against a
+hidden test call; TypeScript and SQL prompts are construct-checked
+(`code_checks`) instead of executed. Every executable task also ships a
+reference implementation (`SOLUTIONS`) which the self-check runs to prove
+each stored answer is what a correct solution actually returns. AXE-Pro
+reuses the same function names with harder contracts (unhashable inputs,
+empty inputs, tie-breaking rules) — memorised answers fail, real
+implementations pass.
 
 ## Python API
 

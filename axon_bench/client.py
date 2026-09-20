@@ -27,6 +27,8 @@ def chat_completion(
 
     base_url must be the OpenAI-compatible root, e.g.
     ``https://api.openai.com/v1`` — ``/chat/completions`` is appended.
+    Honors the standard HTTPS_PROXY / HTTP_PROXY environment variables
+    (urllib default behavior), same as any normal tool.
     """
     url = base_url.rstrip("/") + "/chat/completions"
     payload = json.dumps(

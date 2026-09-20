@@ -5,18 +5,19 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .runner import run_bench, to_json
-from .tasks import select
+from .runner import render_report, run_bench, to_json, write_report
+from .tasks import Task, select
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 EXAMPLE = """\
 examples:
   axon-bench https://api.openai.com/v1 --model gpt-4o --api-key sk-...
   axon-bench http://localhost:11434/v1 --model llama3.1:8b
   axon-bench https://axon-chat-nu.vercel.app/api/v1 --model axon-1.7 --api-key axk_...
-  axon-bench URL --model NAME --pro               # adversarial subset only
+  axon-bench URL --model NAME --track pro            # adversarial subset only
   axon-bench URL --model NAME --category coding --json > out.json
+  axon-bench URL --model NAME --limit 5 --report run.txt
 """
 
 CATEGORY_LABELS = {"general": "General", "coding": "Coding", "reasoning": "Reasoning"}
@@ -32,9 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("base_url", help="OpenAI-compatible API root, e.g. https://api.openai.com/v1")
     parser.add_argument("--model", "-m", required=True, help="model name to benchmark")
     parser.add_argument("--api-key", "-k", default="EMPTY", help="bearer token (default: EMPTY for local servers)")
-    parser.add_argument("--pro", action="store_true", help="run the adversarial AXE-Pro subset instead of standard AXE")
+    parser.add_argument("--pro", action="store_true", help="shorthand for --track pro")
+    parser.add_argument("--track", "-t", choices=["axe", "pro"], default=None, help="task track to run (default: axe)")
     parser.add_argument("--category", "-c", choices=["general", "coding", "reasoning"], help="restrict to one category")
-    parser.add_argument("--limit", "-n", type=int, default=None, help="run at most N tasks (per category)")
+    parser.add_argument("--limit", "-n", type=int, default=None, help="run at most N tasks per category")
+    parser.add_argument("--report", "-r", default=None, help="write the human-readable report to this file")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--code-timeout", type=float, default=10.0, help="seconds allowed per coding task execution")
@@ -42,14 +45,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"axon-bench {VERSION} (AXE v1)")
     args = parser.parse_args(argv)
 
-    tasks = select(category=args.category, pro=args.pro)
+    pro = args.pro or args.track == "pro"
+    tasks = select(category=args.category, pro=pro)
     if args.limit is not None:
-        tasks = tasks[: args.limit]
+        counts: dict[str, int] = {}
+        capped: list[Task] = []
+        for task in tasks:
+            counts[task.category] = counts.get(task.category, 0) + 1
+            if counts[task.category] <= args.limit:
+                capped.append(task)
+        tasks = capped
     if not tasks:
         print("no tasks selected", file=sys.stderr)
         return 2
 
-    track = "AXE-Pro" if args.pro else "AXE"
+    track = "AXE-Pro" if pro else "AXE"
 
     if not args.json:
         print(f"AXE v1 · {track} · {len(tasks)} tasks · model: {args.model}")
@@ -73,21 +83,18 @@ def main(argv: list[str] | None = None) -> int:
         progress=progress,
     )
 
+    if args.report:
+        write_report(result, args.report)
     if args.json:
         print(to_json(result))
+        if args.report:
+            print(f"report written to {args.report}", file=sys.stderr)
         return 0
 
     print()
-    print(f"{'=' * 44}")
-    print(f"{track} results — {result.model}")
-    print(f"{'=' * 44}")
-    for category in ("general", "coding", "reasoning"):
-        score = result.category_score(category)
-        if score is None:
-            continue
-        print(f"  {CATEGORY_LABELS[category]:<11} {score:5.1f}")
-    print(f"{'-' * 44}")
-    print(f"  {'Overall':<11} {result.overall():5.1f}")
+    print(render_report(result))
+    if args.report:
+        print(f"\nreport written to {args.report}")
     return 0
 
 
