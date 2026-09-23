@@ -16,7 +16,7 @@ so a model can't win by substring luck.
 ## Install
 
 ```bash
-pip install axon-bench
+pip install git+https://github.com/anymousxe/axon-bench.git@v1.1.0
 ```
 
 Requires Python 3.9+. Zero dependencies — the client is stdlib only.
@@ -33,7 +33,7 @@ axon-bench https://api.openai.com/v1 --model gpt-4o --api-key sk-...
 axon-bench http://localhost:11434/v1 --model llama3.1:8b
 
 # Axon public models
-axon-bench https://axon-chat-nu.vercel.app/api/v1 --model axon-1.7 --api-key axk_...
+axon-bench https://axon-chat-nu.vercel.app/api/v1 --model axon-1.8-flash --api-key axk_...
 ```
 
 ```
@@ -51,11 +51,11 @@ axon-bench https://axon-chat-nu.vercel.app/api/v1 --model axon-1.7 --api-key axk
 Example report:
 
 ```
-AXE v1 · AXE · 50 tasks · model: your-model
-  [1/50] ✓ What is the capital of Australia?
+AXE v1 · AXE · 60 tasks · model: your-model
+  [1/60] ✓ What is the capital of Australia?
   ...
 
-AXE v1 · AXE · 50 tasks · your-model
+AXE v1 · AXE · 60 tasks · your-model
 ===================================
 Category      Pass   Score
 general      18/20   90.0%
@@ -75,7 +75,7 @@ prompts):
 
 | Track | General | Coding | Reasoning | Total |
 |---|---|---|---|---|
-| AXE | 46 | 43 | 37 | 126 |
+| AXE | 46 | 43 | 38 | 127 |
 | AXE-Pro | 19 | 13 | 11 | 43 |
 
 Python coding prompts ask for a single function, then run it against a
@@ -100,8 +100,8 @@ print(result.category_score("coding"))
 
 ## Scoring
 
-Scores are percent of tasks passed. Release numbers published on
-[axon-chat-nu.vercel.app/benchmarks](https://axon-chat-nu.vercel.app/benchmarks)
-are produced with this exact tool.
+Scores are the percentage of tasks passed on a named track. Publish measured
+results with the model ID, run date, track, task count, settings, and full
+report; these results are distinct from any calibrated profile charts.
 
 MIT license · Axon Labs

@@ -4,7 +4,7 @@
 
 ### Added
 - Task bank expanded 70 → 170 hand-written, contamination-screened tasks:
-  65 general (46 standard / 19 pro), 56 coding (43 / 13), 49 reasoning (37 / 11);
+  65 general (46 standard / 19 pro), 56 coding (43 / 13), 49 reasoning (38 / 11);
   43 tasks form AXE-Pro.
 - New coding coverage: TypeScript and SQL tasks (construct-checked via
   `code_checks`), plus algorithms and data-structure tasks (executed):
