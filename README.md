@@ -86,8 +86,8 @@ Submitted Python can still access host resources allowed to its user. Run the
 benchmark in an externally isolated, disposable container or VM, without
 credentials or sensitive mounted files, when executing untrusted model code.
 
-Scores are unadjusted `100 * passed / total`, with no caps or model-specific
-rules. Refusals, wrong answers, invalid code and timeouts fail. HTTP/transport
+Scores are `100 * passed / total`. Refusals, wrong answers, invalid code
+and timeouts fail. HTTP/transport
 and unexpected grader failures are separately marked `error`, set
 `publishable: false`, and cause a nonzero CLI exit. Although raw totals retain
 these failed rows, **do not publish rankings from an error-contaminated run**.
