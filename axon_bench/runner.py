@@ -24,6 +24,7 @@ from .tasks import DIFFICULTIES, TASK_HASH, TASK_REVISION, Task
 
 FENCE_RE = re.compile(r"```[ \t]*(?:python|python3|py)?[ \t]*\r?\n([\s\S]*?)```", re.IGNORECASE)
 OUTPUT_LIMIT = 1024 * 1024
+SCORER_REVISION = "2026-09-23-final-answer-2"
 CODE_TEMPLATE = """\
 import contextlib
 import resource
@@ -87,11 +88,48 @@ def normalise(text: str) -> str:
     return re.sub(r"\s*([,/])\s*", r"\1", normalized)
 
 
+def _unformat_answer(text: str) -> str:
+    text = text.strip().removesuffix(".").strip()
+    for left, right in (("**", "**"), ("$", "$"), ("`", "`"), (r"\(", r"\)")):
+        if text.startswith(left) and text.endswith(right):
+            text = text[len(left):-len(right)].strip()
+    return re.sub(r"\\(?:d?frac)\{([+-]?\d+)\}\{(\d+)\}", r"\1/\2", text)
+
+
+def _final_answer(response: str, reasoning: bool) -> str:
+    """Extract a chosen final answer without consulting the expected key."""
+    whole = _unformat_answer(response)
+    if not reasoning:
+        return whole
+    lines = [line.strip() for line in response.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    explicit = re.fullmatch(r"(?:final answer|answer|result)\s*[:=]\s*(.+)", last, re.I)
+    if explicit:
+        return _unformat_answer(explicit.group(1))
+    emphasized = re.search(r"\*\*([^*\n]+)\*\*\.?$", last)
+    if emphasized:
+        prefix = last[:emphasized.start()]
+        if re.search(r"\b(answer|therefore|thus|so)\b|=", prefix, re.I) and not re.search(r"\b(not|isn't|is not|or)\b", prefix, re.I):
+            return _unformat_answer(emphasized.group(1))
+    boxed = re.search(r"\\boxed\{((?:[^{}]|\{[^{}]*\})+)\}[.$ ]*$", last)
+    if boxed and not re.search(r"\bnot\b", last[:boxed.start()], re.I):
+        return _unformat_answer(boxed.group(1))
+    final = _unformat_answer(last)
+    scalar = re.fullmatch(r"(?:[+-]?\d+(?:\.\d+)?(?:\s*/\s*\d+)?(?:\s*,\s*[+-]?\d+)*|[a-z]|yes|no|true|false)", final, re.I)
+    explanation = "\n".join(lines[:-1])
+    candidate_dump = re.search(r"\b(candidates?|options?|possible answers?)\b", explanation, re.I)
+    if len(lines) > 1 and scalar and not candidate_dump and re.search(r"[a-z]{3,}|.{10,}[=+*]", explanation, re.I):
+        return final
+    return whole
+
+
 def text_passed(task: Task, response: str) -> tuple[bool, str]:
-    actual = normalise(response)
+    actual = normalise(_final_answer(response, task.category == "reasoning"))
     for candidate in (task.answer, *task.aliases):
         if actual and actual == normalise(candidate):
-            return True, "exact answer"
+            return True, "final answer matched" if task.category == "reasoning" else "exact answer"
     return False, f"expected one of {[task.answer, *task.aliases]}; received {response[:160]!r}"
 
 
@@ -215,6 +253,7 @@ def run_bench(base_url: str, api_key: str, model: str, tasks: list[Task], *,
 def to_json(result: BenchResult) -> str:
     return json.dumps({
         "bench": "AXE v1", "version": "1.1.1", "taskRevision": TASK_REVISION, "taskHash": TASK_HASH,
+        "scorerRevision": SCORER_REVISION,
         "track": result.track, "model": result.model, "overall": result.overall(),
         "temperature": result.temperature, "maxOutputTokens": result.max_tokens,
         "codeTimeout": result.code_timeout,

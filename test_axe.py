@@ -55,6 +55,21 @@ def test_signs_and_punctuation_keep_meaning():
     assert not score_task(decimal, "0/5")[0]
 
 
+def test_reasoning_final_answer_is_scored_not_explanation_format():
+    task = Task("How many edges?", "14", "reasoning")
+    assert score_task(task, "Sum of degrees is 28, so divide by two.\n\n14")[0]
+    assert score_task(task, "Derivation gives 14.\nFinal answer: **14**.")[0]
+    assert not score_task(task, "14\n13")[0]
+    assert not score_task(task, "13\n14")[0]
+    assert not score_task(task, "Possible answers: 12, 13, 14\n14")[0]
+    assert not score_task(task, "The final answer is not **14**.")[0]
+    assert not score_task(task, "Compute the degrees.\nFinal answer: 13")[0]
+    fraction = Task("Conditional probability?", "1/3", "reasoning")
+    assert score_task(fraction, "Divide the conditional counts.\nSo the answer is **1/3**.")[0]
+    assert score_task(fraction, r"\boxed{\frac{1}{3}}")[0]
+    assert not score_task(fraction, "1/3 or 2/3")[0]
+
+
 def test_all_cases_must_pass_not_just_example():
     task = Task("Implement absolute", "[3, 0, 4]", "coding", kind="code",
                 test_call="[absolute(-3), absolute(0), absolute(4)]")

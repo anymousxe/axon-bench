@@ -60,13 +60,14 @@ Repeat with `--track pro` for the other 143 questions.
 
 ## Scoring and execution
 
-Text scoring compares the **entire answer** with the key or an explicit alias.
-Only Unicode composition, case, and whitespace are normalized. Signs,
-punctuation, decimal points, and accents retain meaning: `O-` cannot pass for
-`O+`, `-7` cannot pass for `7`, and an answer dump containing the right candidate
-is not a correct answer. Prompts request an answer without explanation. This
-is an exact-answer benchmark, not a semantic essay grader; extra prose fails.
-Aliases are complete equivalent answers, never substrings.
+Knowledge scoring compares the whole answer with the key or an explicit alias.
+Reasoning scoring also accepts a clearly selected final answer after a worked
+explanation: a final-answer label, terminal boxed/emphasized answer, or a
+standalone scalar following the derivation. Extraction never consults the key.
+Candidate lists without a selected answer, negations, and answers containing
+alternatives do not pass. Case, whitespace and simple presentation wrappers are
+normalized; signs, decimal points and accents retain meaning. JSON records
+scorer revision `2026-09-23-final-answer-2` separately from the task hash.
 
 All 96 coding tasks require Python functions. Each submission is executed
 against at least four cases, including boundaries and nontrivial inputs; all

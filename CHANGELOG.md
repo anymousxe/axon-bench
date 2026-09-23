@@ -11,8 +11,10 @@
   difficulty selection/reporting, and raw responses in JSON results.
 - Replace construct-only coding grades with Python execution; every coding
   item has multiple boundary/nontrivial cases and a reference implementation.
-- Change text grading from containment to strict whole-answer comparison,
-  retaining meaningful signs/punctuation and rejecting contradictory dumps.
+- Replace containment with whole-answer comparison and explicit final-answer
+  extraction for reasoning, preserving signs and rejecting candidate dumps.
+- Identify the held-out-check grading correction as scorer revision
+  `2026-09-23-final-answer-2`; retain package release 1.1.1 and task revision.
 - Bound execution resources and inherited environment; these subprocess
   controls are explicitly not an OS sandbox.
 - Separate transport/grader errors from model mistakes and refusals. Runs
