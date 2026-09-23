@@ -2,6 +2,24 @@
 
 ## 1.1.1 — 2026-09-23
 
+### Task revision 2026-09-23-depth-1
+- Keep package release 1.1.1; distinguish the new task bank with an explicit
+  revision and SHA-256 of tasks, keys, cases, and reference implementations.
+- Replace the former 127/43 selection with independent 143-task AXE and
+  143-task AXE-Pro tracks, each 48 general, 48 coding, and 47 reasoning.
+- Add stable task IDs, editorial difficulty levels, reference derivations,
+  difficulty selection/reporting, and raw responses in JSON results.
+- Replace construct-only coding grades with Python execution; every coding
+  item has multiple boundary/nontrivial cases and a reference implementation.
+- Change text grading from containment to strict whole-answer comparison,
+  retaining meaningful signs/punctuation and rejecting contradictory dumps.
+- Bound execution resources and inherited environment; these subprocess
+  controls are explicitly not an OS sandbox.
+- Separate transport/grader errors from model mistakes and refusals. Runs
+  with infrastructure errors are marked unpublishable; CLI exits nonzero.
+- Replace obsolete grader tests with behavioral regressions and all-reference
+  verification. Historical results must not be compared across revisions.
+
 ### Fixed
 - Executable code scoring now compares the hidden call's return value without
   treating unrelated prints in a submission as part of that value.

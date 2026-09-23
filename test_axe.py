@@ -1,280 +1,160 @@
-"""Offline verification: bank integrity, scoring logic, reference solutions,
-and a mock-server end-to-end run. No network beyond a localhost mock.
+"""Offline behavioral regressions and independent reference-case verification.
 
-Runs under pytest (``python -m pytest -q``) or directly (``python test_axe.py``).
+Run with pytest or `python test_axe.py`. No model endpoint is contacted.
 """
-
 import contextlib
 import io
 import json
-import sys
-import tempfile
+import os
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
+from collections import Counter
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 
-sys.path.insert(0, ".")
-
-import axon_bench  # noqa: E402
-from axon_bench.runner import (  # noqa: E402
-    BenchResult,
-    TaskResult,
-    extract_code,
-    normalise,
-    render_report,
-    run_bench,
-    run_code,
-    score_task,
-    text_passed,
-    write_report,
-)
-from axon_bench.tasks import CODING, GENERAL, REASONING, SOLUTIONS, TASKS, Task, select  # noqa: E402
-
-MOCK_PORT = 8791
+from axon_bench.cli import main
+from axon_bench.runner import BenchResult, TaskResult, run_bench, run_code, score_task, to_json
+from axon_bench.tasks import CODING, DIFFICULTIES, SOLUTIONS, TASKS, Task, select, select_tasks
 
 
 def test_bank_integrity():
-    assert axon_bench.__version__ == "1.1.0"
-    assert len(TASKS) >= 150, len(TASKS)
-    assert len(GENERAL) >= 60 and len(CODING) >= 45 and len(REASONING) >= 45
-    assert sum(1 for t in TASKS if t.pro) >= 40
-    prompts = [t.prompt for t in TASKS]
-    assert len(prompts) == len(set(prompts)), "duplicate prompts in bank"
-    for task in TASKS:
-        assert task.prompt and task.answer, task
-        assert task.category in ("general", "coding", "reasoning")
-        assert isinstance(task.aliases, tuple) and isinstance(task.code_checks, tuple)
-        if task.category == "coding":
-            assert task.test_call or task.code_checks, task.prompt
+    assert len(TASKS) == 286
+    assert len({t.id for t in TASKS}) == len(TASKS)
+    assert len({t.prompt for t in TASKS}) == len(TASKS)
+    assert all(t.id and t.reference and t.difficulty in DIFFICULTIES for t in TASKS)
+    for pro in (False, True):
+        rows = select(pro=pro)
+        assert Counter(t.category for t in rows) == {"general": 48, "coding": 48, "reasoning": 47}
+        assert rows == select_tasks(pro=pro)
+        assert {t.difficulty for t in rows} >= {"medium", "hard", "expert"}
+    assert not set(t.id for t in select()) & set(t.id for t in select(pro=True))
+    assert all(t.kind == "code" and len(t.test_cases) >= 4 and t.test_call for t in CODING)
 
 
-def test_select_filters():
-    standard = select()
-    pro = select(pro=True)
-    assert standard == [t for t in TASKS if not t.pro]
-    assert pro and all(t.pro for t in pro)
-    assert len(standard) + len(pro) == len(TASKS)
-    coding_pro = select(category="coding", pro=True)
-    assert coding_pro and all(t.category == "coding" and t.pro for t in coding_pro)
-    assert {t.category for t in select(category="reasoning")} == {"reasoning"}
+def test_exact_scoring_rejects_candidate_dumps_and_negation():
+    task = Task("Name the city", "Canberra", "general")
+    assert score_task(task, " CANBERRA\n")[0]
+    for response in ("not Canberra", "Sydney or Canberra", "Canberra, Sydney", "Canberran", "I cannot answer"):
+        assert not score_task(task, response)[0], response
 
 
-def test_code_extraction():
-    blocks = {
-        "```python\ndef factorial(n):\n    return 1 if n <= 1 else n * factorial(n - 1)\n```": "def factorial",
-        "```typescript\nfunction firstOrNull<T>(items: T[]): T | null {\n  return items[0] ?? null;\n}\n```": "firstOrNull",
-        "```sql\nSELECT DISTINCT salary FROM employees ORDER BY salary DESC LIMIT 1 OFFSET 1\n```": "OFFSET 1",
-        "```\ndef fib(n):\n    return n\n```": "def fib",
-        "here is one:\n```py\ndef dot(a, b):\n    return 3\n```\nthanks": "def dot",
-    }
-    assert extract_code("I don't write code.") is None
-    for block, marker in blocks.items():
-        code = extract_code(block)
-        assert code is not None and marker in code, block
-    out, err = run_code(extract_code(list(blocks)[0]) or "", "factorial(5)", 10)
-    assert err == "" and out == "120"
-    loop = "```python\ndef factorial(n):\n    while True: pass\n```"
-    out, err = run_code(extract_code(loop) or "", "factorial(5)", 2)
-    assert out is None and "timed out" in err, err
+def test_signs_and_punctuation_keep_meaning():
+    negative = Task("Signed value", "-7", "reasoning")
+    assert score_task(negative, "-7")[0]
+    assert not score_task(negative, "7")[0]
+    assert not score_task(negative, "+7")[0]
+    blood = Task("Exact group", "O-negative", "general", aliases=("O-",))
+    assert score_task(blood, "O-")[0]
+    for response in ("O", "O+", "O-positive", "O-negative or O-positive"):
+        assert not score_task(blood, response)[0]
+    decimal = Task("decimal", "0.5", "reasoning")
+    assert not score_task(decimal, "0 5")[0]
+    pair = Task("pair", "1,4", "reasoning")
+    assert score_task(pair, "1, 4")[0]
+    fraction = Task("fraction", "1/2", "reasoning")
+    assert score_task(fraction, "1 / 2")[0]
+    assert not score_task(decimal, "0/5")[0]
 
 
-def test_code_output_does_not_change_result():
-    code = "print('setup')\ndef collatz_len(n):\n    print('debug')\n    return 111"
-    out, err = run_code(code, "collatz_len(27)", 10)
-    assert err == "" and out == "111"
+def test_all_cases_must_pass_not_just_example():
+    task = Task("Implement absolute", "[3, 0, 4]", "coding", kind="code",
+                test_call="[absolute(-3), absolute(0), absolute(4)]")
+    assert score_task(task, "def absolute(n):\n    return abs(n)")[0]
+    assert not score_task(task, "def absolute(n):\n    return 3")[0]
+    assert not score_task(task, "def absolute(n):\n    return -n")[0]
+    assert not score_task(task, "```python\n# def absolute; return abs(n)\n```")[0]
 
 
-def test_scoring():
-    factorial = next(t for t in CODING if "factorial" in t.prompt)
-    passed, _ = score_task(factorial, "```python\n" + SOLUTIONS["factorial"] + "```", 10)
-    assert passed
-    passed, detail = score_task(factorial, "```python\ndef factorial(n):\n    return n\n```", 10)
-    assert not passed and "expected" in detail
-    passed, detail = score_task(factorial, "I don't write code.", 10)
-    assert not passed and "no code block" in detail
-
-    ts_task = next(t for t in CODING if "firstOrNull" in t.prompt and t.kind == "code")
-    good_ts = "```typescript\nfunction firstOrNull<T>(items: T[]): T | null {\n  return items.length ? items[0] : null;\n}\n```"
-    passed, detail = score_task(ts_task, good_ts, 10)
-    assert passed, detail
-    passed, detail = score_task(ts_task, "```typescript\nexport const pick = (x) => x[0];\n```", 10)
-    assert not passed and "missing required construct" in detail
-
-    sql_task = next(t for t in CODING if "DENSE_RANK" in t.prompt)
-    low_sql = "```sql\nselect name, dense_rank() over (partition by dept order by pay desc) from employees\n```"
-    passed, detail = score_task(sql_task, low_sql, 10)
-    assert passed, detail
-
-    plain = Task("Write hello", "hello", "coding")  # neither test_call nor code_checks
-    passed, detail = score_task(plain, "The function returns hello.", 10)
-    assert passed, detail
+def test_code_results_use_values_not_dict_insertion_order():
+    task = Task("mapping", "{'a': [1, False], 'b': 2}", "coding", kind="code", test_call="f()")
+    assert score_task(task, "def f():\n    return {'b': 2.0, 'a': [1, False]}")[0]
+    assert not score_task(task, "def f():\n    return {'b': 2, 'a': [1, 0]}")[0]
+    assert not score_task(task, "def f():\n    return {'b': 2, 'a': (1, False)}")[0]
 
 
-def test_text_scoring():
-    canberra = next(t for t in GENERAL if "capital of Australia" in t.prompt)
-    assert text_passed(canberra, "The capital of Australia is Canberra.")[0]
-    assert text_passed(canberra, "CANBERRA")[0]
-    assert text_passed(canberra, "Canberra!")[0]
-    assert not text_passed(canberra, "I don't know")[0]
-    marquez = next(t for t in GENERAL if "One Hundred Years" in t.prompt)
-    assert text_passed(marquez, "Gabriel Garcia Marquez wrote it.")[0]
-    saturn = next(t for t in GENERAL if "moons" in t.prompt)
-    assert not text_passed(saturn, "Jupiter used to have the most")[0]
-    assert normalise("GarçOn–Márquez!!") == "garcon marquez"
+def test_construct_only_code_cannot_pass():
+    task = Task("query", "whatever", "coding", kind="code", code_checks=("SELECT",))
+    assert not score_task(task, "```sql\nSELECT wrong FROM missing\n```")[0]
+
+
+def test_execution_is_bounded_and_ignores_debug_prints():
+    out, error = run_code("print('setup')\ndef f():\n    print('debug')\n    return 19", "f()", 3)
+    assert (out, error) == ("19", "")
+    out, error = run_code("def f():\n    while True: pass", "f()", 0.1)
+    assert out is None and error
+    out, error = run_code("def f():\n    raise ValueError('bad')", "f()", 3)
+    assert out is None and error
+    with patch.dict(os.environ, {"AXE_TEST_SECRET": "must-not-inherit"}):
+        out, error = run_code("import os\ndef f():\n    return os.getenv('AXE_TEST_SECRET')", "f()", 3)
+    assert (out, error) == ("None", "")
 
 
 def test_reference_solutions():
-    executable = [t for t in CODING if t.test_call]
-    assert len(executable) >= 40, len(executable)
-    for task in executable:
-        name = task.test_call.split("(")[0]
-        assert name in SOLUTIONS, name
-        out, err = run_code(SOLUTIONS[name], task.test_call, 15)
-        assert err == "", f"{name}: {err}"
-        assert out == task.answer, f"{name}: {out!r} != {task.answer!r}"
+    for task in CODING:
+        passed, detail = score_task(task, SOLUTIONS[task.solution_name], 10)
+        assert passed, f"{task.id}: {detail}"
 
 
-def test_run_bench_isolation():
-    import axon_bench.runner as runner_mod
+def test_refusals_are_wrong_but_transport_errors_invalidate_run():
+    rows = [Task("one", "yes", "general"), Task("two", "yes", "general"), Task("three", "yes", "general")]
+    with patch("axon_bench.runner.chat_completion", side_effect=["yes", "I cannot answer", RuntimeError("offline")]):
+        result = run_bench("http://unused", "", "model", rows, track="AXE", temperature=0, max_tokens=16, code_timeout=3)
+    assert [r.passed for r in result.results] == [True, False, False]
+    assert [r.error for r in result.results] == [False, False, True]
+    assert result.overall() == 100 / 3
+    report = json.loads(to_json(result))
+    assert report["publishable"] is False
+    assert report["requestErrors"] == 1
+    assert report["tasks"][1]["status"] == "fail"
+    assert report["tasks"][2]["status"] == "error"
 
-    hard = next(t for t in REASONING if "17 times 23" in t.prompt)
-    easy = Task("What is 5 plus 5?", "10", "reasoning")
-    original = runner_mod.chat_completion
 
-    def flaky(base_url, api_key, model, prompt, **kwargs):
-        if "17 times 23" in prompt:
-            raise RuntimeError("connection reset")
-        return "10"
+def test_scores_are_measured_not_capped():
+    task = Task("x", "y", "general")
+    result = BenchResult("any", "AXE", [TaskResult(task, True, "", "y", 0)])
+    assert result.overall() == 100
+    assert json.loads(to_json(result))["overall"] == 100
+    result.results[0].passed = False
+    assert result.overall() == 0
 
-    runner_mod.chat_completion = flaky
+
+def test_cli_real_http_and_difficulty_selection():
+    tasks = [Task("first", "yes", "general", id="fixture-one", difficulty="hard"),
+             Task("second", "no", "reasoning", id="fixture-two", difficulty="hard")]
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            answer = "yes" if body["messages"][0]["content"] == "first" else "wrong"
+            encoded = json.dumps({"choices": [{"message": {"content": answer}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    output = io.StringIO()
     try:
-        result = run_bench("", "", "fake", [hard, easy], track="AXE", temperature=0.0, max_tokens=16, code_timeout=5)
-    finally:
-        runner_mod.chat_completion = original
-    assert len(result.results) == 2
-    assert not result.results[0].passed and "request failed" in result.results[0].detail
-    assert result.results[1].passed
-    assert result.overall() == 50.0
-
-
-def test_reports():
-    factorial = next(t for t in CODING if "factorial" in t.prompt)
-    other = Task("Impossible?", "nope", "general")
-    result = BenchResult(
-        model="mock",
-        track="AXE",
-        results=[
-            TaskResult(task=factorial, passed=True, detail="ok", response="", seconds=0.5),
-            TaskResult(task=other, passed=False, detail="nope", response="", seconds=0.25),
-        ],
-    )
-    text = render_report(result)
-    assert "AXE v1 · AXE · 2 tasks · mock" in text
-    assert "coding" in text and "general" in text
-    assert "✓" in text and "✗" in text
-    assert "Overall" in text and "50.0%" in text
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "nested" / "report.txt"
-        write_report(result, str(path))
-        assert path.read_text(encoding="utf-8").startswith("AXE v1")
-
-
-ANSWERS = {
-    "capital of Australia": "The capital of Australia is Canberra.",
-    "13th President": "Millard Fillmore was the 13th President.",
-    "count_words": "```python\n" + SOLUTIONS["count_words"] + "```",
-    "fizzbuzz": "```python\n" + SOLUTIONS["fizzbuzz"] + "```",
-    "17 times 23": "391",
-}
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        prompt = body["messages"][0]["content"]
-        answer = "I don't know."
-        for key, value in ANSWERS.items():
-            if key in prompt:
-                answer = value
-                break
-        resp = json.dumps({"choices": [{"message": {"content": answer}}]}).encode()
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", str(len(resp)))
-        self.end_headers()
-        self.wfile.write(resp)
-
-    def log_message(self, *args):
-        pass
-
-
-def test_end_to_end():
-    from axon_bench.cli import main
-
-    server = HTTPServer(("127.0.0.1", MOCK_PORT), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        url = f"http://127.0.0.1:{MOCK_PORT}/v1"
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = main([url, "--model", "mock-1", "--category", "reasoning", "--limit", "1", "--json"])
-        assert rc == 0
-        parsed = json.loads(buf.getvalue())
-        assert parsed["scores"]["reasoning"] == 100.0, parsed["scores"]
-        assert parsed["tasks"][0]["pro"] is False
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = main([url, "--model", "mock-1", "--category", "coding", "--limit", "2", "--json"])
-        assert rc == 0
-        parsed = json.loads(buf.getvalue())
-        assert parsed["overall"] == 100.0, [t["detail"] for t in parsed["tasks"]]
-        assert len(parsed["tasks"]) == 2
-
-        with tempfile.TemporaryDirectory() as tmp:
-            report = Path(tmp) / "report.txt"
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-                rc = main([url, "--model", "mock-1", "--track", "pro", "--category", "general", "--limit", "1", "--json", "--report", str(report)])
-            assert rc == 0
-            parsed = json.loads(buf.getvalue())
-            assert parsed["track"] == "AXE-Pro"
-            assert parsed["tasks"][0]["pro"] is True
-            assert parsed["overall"] == 100.0, parsed["tasks"][0]
-            assert report.exists() and "AXE v1" in report.read_text(encoding="utf-8")
+        with patch("axon_bench.cli.select", return_value=tasks), contextlib.redirect_stdout(output):
+            status = main([f"http://127.0.0.1:{server.server_port}/v1", "--model", "fixture", "--difficulty", "hard", "--json"])
+        report = json.loads(output.getvalue())
+        assert status == 0 and report["publishable"]
+        assert report["overall"] == 50
+        assert report["byDifficulty"]["hard"] == {"passed": 1, "total": 2}
+        assert report["tasks"][0]["response"] == "yes"
     finally:
         server.shutdown()
-
-
-def _main() -> int:
-    tests = [
-        test_bank_integrity,
-        test_select_filters,
-        test_code_extraction,
-        test_code_output_does_not_change_result,
-        test_scoring,
-        test_text_scoring,
-        test_reference_solutions,
-        test_run_bench_isolation,
-        test_reports,
-        test_end_to_end,
-    ]
-    failures = []
-    for fn in tests:
-        try:
-            fn()
-            print(f"  ok   {fn.__name__}")
-        except AssertionError as error:
-            failures.append(fn.__name__)
-            print(f"  FAIL {fn.__name__}: {error}")
-    print()
-    if failures:
-        print(f"FAILED: {failures}")
-        return 1
-    print("ALL CHECKS PASSED")
-    return 0
+        server.server_close()
+        thread.join()
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    for name, function in list(globals().items()):
+        if name.startswith("test_") and callable(function):
+            function()
+            print(f"PASS {name}")

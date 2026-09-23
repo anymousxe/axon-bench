@@ -22,6 +22,8 @@ def chat_completion(
     max_tokens: int = 2048,
     timeout: float = 180.0,
     retries: int = 3,
+    reasoning_effort: str | None = None,
+    enhancement: bool | None = None,
 ) -> str:
     """POST one chat completion and return the assistant text.
 
@@ -31,14 +33,17 @@ def chat_completion(
     (urllib default behavior), same as any normal tool.
     """
     url = base_url.rstrip("/") + "/chat/completions"
-    payload = json.dumps(
-        {
-            "model": model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-    ).encode("utf-8")
+    body = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if reasoning_effort is not None:
+        body["reasoning_effort"] = reasoning_effort
+    if enhancement is not None:
+        body["enhancement"] = enhancement
+    payload = json.dumps(body).encode("utf-8")
 
     last_error: Exception | None = None
     for attempt in range(retries):
