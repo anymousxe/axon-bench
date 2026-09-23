@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 — 2026-09-23
+
+### Fixed
+- Executable code scoring now compares the hidden call's return value without
+  treating unrelated prints in a submission as part of that value.
+
 ## 1.1.0 — 2026-09-20
 
 ### Added

@@ -26,13 +26,16 @@ from .tasks import Task
 FENCE_RE = re.compile(r"```[ \t]*[a-zA-Z0-9+#._-]*[ \t]*\r?\n([\s\S]*?)```", re.IGNORECASE)
 
 CODE_TEMPLATE = """\
-import sys
-{code}
+import contextlib
+import io
+space = {{"__name__": "__main__"}}
 try:
-    result = {test_call}
+    with contextlib.redirect_stdout(io.StringIO()):
+        exec(compile({code!r}, "<submission>", "exec"), space)
+        result = eval({test_call!r}, space)
 except Exception as exc:
     print("AXE_ERROR:" + type(exc).__name__)
-    sys.exit(0)
+    raise SystemExit(0)
 print(repr(result))
 """
 

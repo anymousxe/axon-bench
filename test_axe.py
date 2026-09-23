@@ -78,6 +78,12 @@ def test_code_extraction():
     assert out is None and "timed out" in err, err
 
 
+def test_code_output_does_not_change_result():
+    code = "print('setup')\ndef collatz_len(n):\n    print('debug')\n    return 111"
+    out, err = run_code(code, "collatz_len(27)", 10)
+    assert err == "" and out == "111"
+
+
 def test_scoring():
     factorial = next(t for t in CODING if "factorial" in t.prompt)
     passed, _ = score_task(factorial, "```python\n" + SOLUTIONS["factorial"] + "```", 10)
@@ -246,6 +252,7 @@ def _main() -> int:
         test_bank_integrity,
         test_select_filters,
         test_code_extraction,
+        test_code_output_does_not_change_result,
         test_scoring,
         test_text_scoring,
         test_reference_solutions,

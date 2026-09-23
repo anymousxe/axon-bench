@@ -8,7 +8,7 @@ import sys
 from .runner import render_report, run_bench, to_json, write_report
 from .tasks import Task, select
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 EXAMPLE = """\
 examples:

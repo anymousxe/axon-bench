@@ -16,7 +16,7 @@ so a model can't win by substring luck.
 ## Install
 
 ```bash
-pip install git+https://github.com/anymousxe/axon-bench.git@v1.1.0
+pip install git+https://github.com/anymousxe/axon-bench.git@v1.1.1
 ```
 
 Requires Python 3.9+. Zero dependencies — the client is stdlib only.
